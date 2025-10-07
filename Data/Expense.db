@@ -1,0 +1,25 @@
+-- Create expenses table
+CREATE TABLE IF NOT EXISTS Expenses (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Amount REAL NOT NULL,
+    Date TEXT NOT NULL,
+    Category TEXT NOT NULL,
+    Notes TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create categories table
+CREATE TABLE IF NOT EXISTS Categories (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL UNIQUE,
+    Description TEXT
+);
+
+-- Create users table (for authentication)
+CREATE TABLE IF NOT EXISTS Users (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Username TEXT NOT NULL UNIQUE,
+    Password TEXT NOT NULL,
+    Email TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);
