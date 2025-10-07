@@ -1,7 +1,9 @@
+using Domain.Controllers;
 using Domain.Data;
 using Domain.Models;
 using Domain.Services;
 using Spectre.Console;
+using System.Linq;
 
 class Program
 {
@@ -10,11 +12,12 @@ class Program
         // Set up SQLite to use the bundled provider
         SQLitePCL.Batteries_V2.Init();
 
+        // Initialize MVC components
         var context = new LedgerContext();
         var categoryService = new CategoryService(context);
         var expenseService = new ExpenseService(context);
         var exportImportService = new ExportImportService(expenseService, categoryService);
-        var initService = new DatabaseInitializationService(context, categoryService);
+        var controller = new ExpenseController(expenseService, categoryService, exportImportService);
 
         AnsiConsole.Write(
             new FigletText("Daily Ledger")
@@ -25,12 +28,12 @@ class Program
 
         try
         {
-            // Initialize database
+            // Initialize database through Controller
             await AnsiConsole.Status()
                 .StartAsync("Initializing database...", async ctx =>
                 {
                     ctx.Spinner(Spinner.Known.Dots);
-                    await initService.InitializeDatabaseAsync();
+                    await controller.InitializeDatabaseAsync();
                 });
 
             // Main menu loop
@@ -55,25 +58,25 @@ class Program
                 switch (choice)
                 {
                     case "View all expenses":
-                        await ViewAllExpenses(expenseService);
+                        await ViewAllExpenses(controller);
                         break;
                     case "Add new expense":
-                        await AddNewExpense(expenseService, categoryService);
+                        await AddNewExpense(controller);
                         break;
                     case "View category summaries":
-                        await ViewCategorySummaries(expenseService);
+                        await ViewCategorySummaries(controller);
                         break;
                     case "Export data to CSV":
-                        await ExportData(exportImportService);
+                        await ExportData(controller);
                         break;
                     case "Import data from CSV":
-                        await ImportData(exportImportService);
+                        await ImportData(controller);
                         break;
                     case "View settings":
-                        await ViewSettings(categoryService);
+                        await ViewSettings(controller);
                         break;
                     case "Clear all data":
-                        await ClearAllData(expenseService, categoryService);
+                        await ClearAllData(controller);
                         break;
                     case "Exit":
                         running = false;
@@ -97,9 +100,9 @@ class Program
         AnsiConsole.MarkupLine("[green]Thank you for using Daily Ledger![/]");
     }
 
-    static async Task ViewAllExpenses(ExpenseService expenseService)
+    static async Task ViewAllExpenses(ExpenseController controller)
     {
-        var expenses = await expenseService.GetExpensesAsync();
+        var expenses = await controller.GetAllExpensesAsync();
 
         if (!expenses.Any())
         {
@@ -127,9 +130,9 @@ class Program
         AnsiConsole.MarkupLine($"[bold green]Total: {expenses.Sum(e => e.Amount):C} across {expenses.Count} expenses[/]");
     }
 
-    static async Task AddNewExpense(ExpenseService expenseService, CategoryService categoryService)
+    static async Task AddNewExpense(ExpenseController controller)
     {
-        var categories = await categoryService.GetCategoriesAsync();
+        var categories = await controller.GetAllCategoriesAsync();
 
         var categoryChoices = categories.Select(c => $"{c.Id}: {c.Name}").ToList();
         categoryChoices.Add("Add new category");
@@ -144,9 +147,9 @@ class Program
         {
             var newCategoryName = AnsiConsole.Ask<string>("Enter new category name:");
             var newCategory = new Category { Name = newCategoryName };
-            await categoryService.AddCategoryAsync(newCategory);
+            await controller.AddCategoryAsync(newCategory);
             categoryId = newCategory.Id;
-            categories = await categoryService.GetCategoriesAsync(); // Refresh
+            categories = await controller.GetAllCategoriesAsync(); // Refresh
         }
         else
         {
@@ -165,16 +168,16 @@ class Program
             Notes = notes
         };
 
-        await expenseService.AddExpenseAsync(expense);
+        await controller.AddExpenseAsync(expense);
         AnsiConsole.MarkupLine("[green]Expense added successfully![/]");
     }
 
-    static async Task ViewCategorySummaries(ExpenseService expenseService)
+    static async Task ViewCategorySummaries(ExpenseController controller)
     {
         var startDate = DateTime.Today.AddDays(-30); // Last 30 days
         var endDate = DateTime.Today;
 
-        var summaries = await expenseService.GetCategorySummariesAsync(startDate, endDate);
+        var summaries = await controller.GetCategorySummariesAsync(startDate, endDate);
 
         if (!summaries.Any())
         {
@@ -205,16 +208,16 @@ class Program
         AnsiConsole.MarkupLine($"[bold green]Total for period: {totalAmount:C}[/]");
     }
 
-    static async Task ExportData(ExportImportService exportImportService)
+    static async Task ExportData(ExpenseController controller)
     {
-        var csvContent = await exportImportService.ExportToCsvAsync();
+        var csvContent = await controller.ExportToCsvAsync();
         await File.WriteAllTextAsync("expenses_export.csv", csvContent);
 
         AnsiConsole.MarkupLine("[green]Data exported to expenses_export.csv[/]");
         AnsiConsole.MarkupLine($"[grey]File contains {csvContent.Split('\n').Length - 1} rows[/]");
     }
 
-    static async Task ImportData(ExportImportService exportImportService)
+    static async Task ImportData(ExpenseController controller)
     {
         var filePath = AnsiConsole.Ask<string>("Enter CSV file path:");
 
@@ -225,7 +228,7 @@ class Program
         }
 
         var csvContent = await File.ReadAllTextAsync(filePath);
-        var result = await exportImportService.ImportFromCsvAsync(csvContent);
+        var result = await controller.ImportFromCsvAsync(csvContent);
 
         if (result.Success)
         {
@@ -237,9 +240,9 @@ class Program
         }
     }
 
-    static async Task ViewSettings(CategoryService categoryService)
+    static async Task ViewSettings(ExpenseController controller)
     {
-        var categories = await categoryService.GetCategoriesAsync();
+        var categories = await controller.GetAllCategoriesAsync();
 
         AnsiConsole.MarkupLine("[bold]Current Categories:[/]");
         foreach (var category in categories)
@@ -248,14 +251,13 @@ class Program
         }
     }
 
-    static async Task ClearAllData(ExpenseService expenseService, CategoryService categoryService)
+    static async Task ClearAllData(ExpenseController controller)
     {
         var confirm = AnsiConsole.Confirm("Are you sure you want to delete all data? This cannot be undone!");
 
         if (confirm)
         {
-            await expenseService.DeleteAllExpensesAsync();
-            await categoryService.InitializeDefaultCategoriesAsync();
+            await controller.ClearAllDataAsync();
             AnsiConsole.MarkupLine("[green]All data cleared successfully![/]");
         }
         else

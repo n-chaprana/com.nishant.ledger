@@ -1,3 +1,4 @@
+using Domain.Controllers;
 using Domain.Data;
 using Domain.Models;
 using Microsoft.EntityFrameworkCore;
@@ -127,12 +128,5 @@ namespace Domain.Services
         }
     }
 
-    public class CategorySummary
-    {
-        public int CategoryId { get; set; }
-        public string? CategoryName { get; set; }
-        public decimal TotalAmount { get; set; }
-        public int ExpenseCount { get; set; }
-        public decimal Percentage { get; set; }
-    }
+
 }
