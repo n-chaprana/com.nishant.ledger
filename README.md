@@ -276,9 +276,31 @@ dotnet build ledger.csproj
 - ✅ Clean separation of concerns
 - ✅ Consistent coding standards
 
-## 📄 License
+## 📄 License & Compliance
 
-This project is developed as a demonstration of clean architecture principles and modern .NET development practices.
+### **Application License**
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+### **OSS License Analysis**
+✅ **LICENSE STATUS: CLEAN** - Comprehensive analysis completed with no issues found.
+
+**Key Findings:**
+- ✅ **No Security Vulnerabilities**: All dependencies scanned and verified
+- ✅ **Permissive Licenses Only**: MIT and Apache 2.0 licenses throughout
+- ✅ **Commercial Ready**: Safe for commercial and open-source distribution
+- ✅ **No Copyleft Risk**: No GPL or viral license contamination
+
+**Detailed Analysis**: See [LICENSE-ANALYSIS.md](LICENSE-ANALYSIS.md) for comprehensive license compliance report.
+
+### **Third-Party Dependencies**
+| Package | License | Usage |
+|---------|---------|-------|
+| Microsoft.EntityFrameworkCore.Sqlite | MIT | Database operations |
+| Spectre.Console | MIT | Console user interface |
+| SQLitePCLRaw.bundle_green | Apache 2.0 | SQLite database engine |
+| System.Text.Json | MIT | JSON serialization |
+
+**All dependencies use permissive licenses compatible with commercial distribution.**
 
 ## 👥 Contributing
 
