@@ -17,7 +17,7 @@ class Program
         var categoryService = new CategoryService(context);
         var expenseService = new ExpenseService(context);
         var exportImportService = new ExportImportService(expenseService, categoryService);
-        var controller = new ExpenseController(expenseService, categoryService, exportImportService);
+        var controller = new ExpenseController(expenseService, categoryService, exportImportService, context);
 
         AnsiConsole.Write(
             new FigletText("Daily Ledger")
@@ -43,14 +43,16 @@ class Program
                 var choice = AnsiConsole.Prompt(
                     new SelectionPrompt<string>()
                         .Title("What would you like to do?")
-                        .PageSize(10)
+                        .PageSize(12)
                         .AddChoices(new[] {
                             "View all expenses",
                             "Add new expense",
+                            "Edit expense",
+                            "Delete expense",
                             "View category summaries",
+                            "Manage categories",
                             "Export data to CSV",
                             "Import data from CSV",
-                            "View settings",
                             "Clear all data",
                             "Exit"
                         }));
@@ -63,17 +65,23 @@ class Program
                     case "Add new expense":
                         await AddNewExpense(controller);
                         break;
+                    case "Edit expense":
+                        await EditExpense(controller);
+                        break;
+                    case "Delete expense":
+                        await DeleteExpense(controller);
+                        break;
                     case "View category summaries":
                         await ViewCategorySummaries(controller);
+                        break;
+                    case "Manage categories":
+                        await ManageCategories(controller);
                         break;
                     case "Export data to CSV":
                         await ExportData(controller);
                         break;
                     case "Import data from CSV":
                         await ImportData(controller);
-                        break;
-                    case "View settings":
-                        await ViewSettings(controller);
                         break;
                     case "Clear all data":
                         await ClearAllData(controller);
@@ -197,7 +205,7 @@ class Program
         {
             var percentage = totalAmount > 0 ? (summary.TotalAmount / totalAmount) * 100 : 0;
             table.AddRow(
-                summary.CategoryName,
+                summary.CategoryName ?? "Unknown",
                 summary.TotalAmount.ToString("C"),
                 summary.ExpenseCount.ToString(),
                 $"{percentage:F1}%"
@@ -240,14 +248,213 @@ class Program
         }
     }
 
-    static async Task ViewSettings(ExpenseController controller)
+    static async Task EditExpense(ExpenseController controller)
     {
-        var categories = await controller.GetAllCategoriesAsync();
+        var expenses = await controller.GetAllExpensesAsync();
 
-        AnsiConsole.MarkupLine("[bold]Current Categories:[/]");
-        foreach (var category in categories)
+        if (!expenses.Any())
         {
-            AnsiConsole.MarkupLine($"• {category.Name}");
+            AnsiConsole.MarkupLine("[yellow]No expenses found to edit.[/]");
+            return;
+        }
+
+        var expenseChoices = expenses.Select(e => 
+            $"{e.Id}: {e.Date:yyyy-MM-dd} - {e.Amount:C} - {e.Category?.Name ?? "No Category"}").ToList();
+
+        var expenseChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select an expense to edit:")
+                .PageSize(10)
+                .AddChoices(expenseChoices));
+
+        var expenseId = int.Parse(expenseChoice.Split(':')[0]);
+        var expense = await controller.GetExpenseByIdAsync(expenseId);
+
+        if (expense == null)
+        {
+            AnsiConsole.MarkupLine("[red]Expense not found![/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[bold]Editing expense from {expense.Date:yyyy-MM-dd}[/]");
+
+        var categories = await controller.GetAllCategoriesAsync();
+        var categoryChoices = categories.Select(c => $"{c.Id}: {c.Name}").ToList();
+
+        var categoryChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title($"Select category (current: {expense.Category?.Name}):")
+                .AddChoices(categoryChoices));
+
+        var categoryId = int.Parse(categoryChoice.Split(':')[0]);
+        var amount = AnsiConsole.Ask("Enter amount:", expense.Amount);
+        var date = AnsiConsole.Ask("Enter date (yyyy-MM-dd):", expense.Date);
+        var notes = AnsiConsole.Ask("Enter notes:", expense.Notes ?? "");
+
+        expense.Amount = amount;
+        expense.Date = date;
+        expense.CategoryId = categoryId;
+        expense.Notes = notes;
+
+        var result = await controller.UpdateExpenseAsync(expense);
+        if (result.Success)
+        {
+            AnsiConsole.MarkupLine($"[green]{result.Message}[/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[red]{result.Message}[/]");
+        }
+    }
+
+    static async Task DeleteExpense(ExpenseController controller)
+    {
+        var expenses = await controller.GetAllExpensesAsync();
+
+        if (!expenses.Any())
+        {
+            AnsiConsole.MarkupLine("[yellow]No expenses found to delete.[/]");
+            return;
+        }
+
+        var expenseChoices = expenses.Select(e => 
+            $"{e.Id}: {e.Date:yyyy-MM-dd} - {e.Amount:C} - {e.Category?.Name ?? "No Category"}").ToList();
+
+        var expenseChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select an expense to delete:")
+                .PageSize(10)
+                .AddChoices(expenseChoices));
+
+        var expenseId = int.Parse(expenseChoice.Split(':')[0]);
+        
+        var confirm = AnsiConsole.Confirm($"Are you sure you want to delete this expense?");
+        if (!confirm)
+        {
+            AnsiConsole.MarkupLine("[grey]Operation cancelled.[/]");
+            return;
+        }
+
+        var result = await controller.DeleteExpenseAsync(expenseId);
+        if (result.Success)
+        {
+            AnsiConsole.MarkupLine($"[green]{result.Message}[/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[red]{result.Message}[/]");
+        }
+    }
+
+    static async Task ManageCategories(ExpenseController controller)
+    {
+        bool managing = true;
+        while (managing)
+        {
+            var categories = await controller.GetAllCategoriesAsync();
+
+            var action = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Category Management")
+                    .AddChoices(new[] {
+                        "View all categories",
+                        "Add new category",
+                        "Edit category",
+                        "Delete category",
+                        "Back to main menu"
+                    }));
+
+            switch (action)
+            {
+                case "View all categories":
+                    var table = new Table();
+                    table.AddColumn("ID");
+                    table.AddColumn("Name");
+                    foreach (var cat in categories)
+                    {
+                        table.AddRow(cat.Id.ToString(), cat.Name);
+                    }
+                    AnsiConsole.Write(table);
+                    break;
+
+                case "Add new category":
+                    var newName = AnsiConsole.Ask<string>("Enter category name:");
+                    var addResult = await controller.AddCategoryAsync(new Category { Name = newName });
+                    if (addResult.Success)
+                    {
+                        AnsiConsole.MarkupLine($"[green]{addResult.Message}[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine($"[red]{addResult.Message}[/]");
+                    }
+                    break;
+
+                case "Edit category":
+                    if (!categories.Any())
+                    {
+                        AnsiConsole.MarkupLine("[yellow]No categories to edit.[/]");
+                        break;
+                    }
+                    var editChoices = categories.Select(c => $"{c.Id}: {c.Name}").ToList();
+                    var editChoice = AnsiConsole.Prompt(
+                        new SelectionPrompt<string>()
+                            .Title("Select category to edit:")
+                            .AddChoices(editChoices));
+                    var editId = int.Parse(editChoice.Split(':')[0]);
+                    var editCat = categories.First(c => c.Id == editId);
+                    var editedName = AnsiConsole.Ask("Enter new name:", editCat.Name);
+                    editCat.Name = editedName;
+                    var editResult = await controller.UpdateCategoryAsync(editCat);
+                    if (editResult.Success)
+                    {
+                        AnsiConsole.MarkupLine($"[green]{editResult.Message}[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine($"[red]{editResult.Message}[/]");
+                    }
+                    break;
+
+                case "Delete category":
+                    if (!categories.Any())
+                    {
+                        AnsiConsole.MarkupLine("[yellow]No categories to delete.[/]");
+                        break;
+                    }
+                    var deleteChoices = categories.Select(c => $"{c.Id}: {c.Name}").ToList();
+                    var deleteChoice = AnsiConsole.Prompt(
+                        new SelectionPrompt<string>()
+                            .Title("Select category to delete:")
+                            .AddChoices(deleteChoices));
+                    var deleteId = int.Parse(deleteChoice.Split(':')[0]);
+                    var confirmDelete = AnsiConsole.Confirm("Are you sure?");
+                    if (confirmDelete)
+                    {
+                        var deleteResult = await controller.DeleteCategoryAsync(deleteId);
+                        if (deleteResult.Success)
+                        {
+                            AnsiConsole.MarkupLine($"[green]{deleteResult.Message}[/]");
+                        }
+                        else
+                        {
+                            AnsiConsole.MarkupLine($"[red]{deleteResult.Message}[/]");
+                        }
+                    }
+                    break;
+
+                case "Back to main menu":
+                    managing = false;
+                    break;
+            }
+
+            if (managing)
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[grey]Press any key to continue...[/]");
+                Console.ReadKey();
+                AnsiConsole.Clear();
+            }
         }
     }
 
@@ -257,8 +464,15 @@ class Program
 
         if (confirm)
         {
-            await controller.ClearAllDataAsync();
-            AnsiConsole.MarkupLine("[green]All data cleared successfully![/]");
+            var result = await controller.ClearAllDataAsync();
+            if (result.Success)
+            {
+                AnsiConsole.MarkupLine($"[green]{result.Message}[/]");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]{result.Message}[/]");
+            }
         }
         else
         {

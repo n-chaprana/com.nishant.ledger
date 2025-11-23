@@ -1,5 +1,7 @@
+using Domain.Data;
 using Domain.Models;
 using Domain.Services;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -10,18 +12,26 @@ namespace Domain.Controllers
         private readonly ExpenseService _expenseService;
         private readonly CategoryService _categoryService;
         private readonly ExportImportService _exportImportService;
+        private readonly LedgerContext _context;
 
-        public ExpenseController(ExpenseService expenseService, CategoryService categoryService, ExportImportService exportImportService)
+        public ExpenseController(ExpenseService expenseService, CategoryService categoryService, 
+            ExportImportService exportImportService, LedgerContext context)
         {
             _expenseService = expenseService;
             _categoryService = categoryService;
             _exportImportService = exportImportService;
+            _context = context;
         }
 
         // Expense Management
-        public async Task<List<Expense>> GetAllExpensesAsync()
+        public async Task<List<Expense>> GetAllExpensesAsync(int page = 1, int pageSize = 100)
         {
-            return await _expenseService.GetExpensesAsync();
+            return await _expenseService.GetExpensesAsync(page, pageSize);
+        }
+
+        public async Task<int> GetExpenseCountAsync()
+        {
+            return await _expenseService.GetExpenseCountAsync();
         }
 
         public async Task<Expense?> GetExpenseByIdAsync(int id)
@@ -34,21 +44,19 @@ namespace Domain.Controllers
             return await _expenseService.GetExpensesByDateRangeAsync(startDate, endDate);
         }
 
-        public async Task AddExpenseAsync(Expense expense)
+        public async Task<(bool Success, string Message)> AddExpenseAsync(Expense expense)
         {
-            await _expenseService.AddExpenseAsync(expense);
+            return await _expenseService.AddExpenseAsync(expense);
         }
 
-        public async Task<bool> UpdateExpenseAsync(Expense expense)
+        public async Task<(bool Success, string Message)> UpdateExpenseAsync(Expense expense)
         {
-            var result = await _expenseService.UpdateExpenseAsync(expense);
-            return result.Success;
+            return await _expenseService.UpdateExpenseAsync(expense);
         }
 
-        public async Task<bool> DeleteExpenseAsync(int id)
+        public async Task<(bool Success, string Message)> DeleteExpenseAsync(int id)
         {
-            var result = await _expenseService.DeleteExpenseAsync(id);
-            return result.Success;
+            return await _expenseService.DeleteExpenseAsync(id);
         }
 
         public async Task<decimal> GetTotalSpentAsync()
@@ -72,35 +80,19 @@ namespace Domain.Controllers
             return await _categoryService.GetCategoryByIdAsync(id);
         }
 
-        public async Task AddCategoryAsync(Category category)
+        public async Task<(bool Success, string Message)> AddCategoryAsync(Category category)
         {
-            await _categoryService.AddCategoryAsync(category);
+            return await _categoryService.AddCategoryAsync(category);
         }
 
-        public async Task<bool> UpdateCategoryAsync(Category category)
+        public async Task<(bool Success, string Message)> UpdateCategoryAsync(Category category)
         {
-            try
-            {
-                await _categoryService.UpdateCategoryAsync(category);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return await _categoryService.UpdateCategoryAsync(category);
         }
 
-        public async Task<bool> DeleteCategoryAsync(int id)
+        public async Task<(bool Success, string Message)> DeleteCategoryAsync(int id)
         {
-            try
-            {
-                await _categoryService.DeleteCategoryAsync(id);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return await _categoryService.DeleteCategoryAsync(id);
         }
 
         // Analytics
@@ -122,24 +114,37 @@ namespace Domain.Controllers
 
         public async Task InitializeDatabaseAsync()
         {
-            var context = new Data.LedgerContext();
-            var initService = new DatabaseInitializationService(context, _categoryService);
+            var initService = new DatabaseInitializationService(_context, _categoryService);
             await initService.InitializeDatabaseAsync();
         }
 
-        public async Task ClearAllDataAsync()
+        public async Task<(bool Success, string Message)> ClearAllDataAsync()
         {
-            await _expenseService.DeleteAllExpensesAsync();
-            await _categoryService.InitializeDefaultCategoriesAsync();
-        }
-    }
+            try
+            {
+                // Delete all expenses first
+                var expenseResult = await _expenseService.DeleteAllExpensesAsync();
+                if (!expenseResult.Success)
+                {
+                    return (false, $"Failed to delete expenses: {expenseResult.Message}");
+                }
 
-    public class CategorySummary
-    {
-        public int CategoryId { get; set; }
-        public string? CategoryName { get; set; }
-        public decimal TotalAmount { get; set; }
-        public int ExpenseCount { get; set; }
-        public decimal Percentage { get; set; }
+                // Delete all categories
+                var categoryResult = await _categoryService.DeleteAllCategoriesAsync();
+                if (!categoryResult.Success)
+                {
+                    return (false, $"Failed to delete categories: {categoryResult.Message}");
+                }
+
+                // Reinitialize default categories
+                await _categoryService.InitializeDefaultCategoriesAsync();
+
+                return (true, "All data cleared and default categories restored successfully");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Error clearing data: {ex.Message}");
+            }
+        }
     }
 }

@@ -1,7 +1,6 @@
 using Domain.Models;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -45,13 +44,22 @@ namespace Domain.Services
                 if (lines.Length < 2) return (false, "CSV file is empty or invalid", 0);
 
                 var importedCount = 0;
+                var skippedCount = 0;
+                var errors = new List<string>();
+                
                 var categories = await _categoryService.GetCategoriesAsync();
-                var categoryDict = categories.ToDictionary(c => c.Name.ToLower(), c => c.Id);
+                var categoryDict = categories
+                    .Where(c => !string.IsNullOrEmpty(c.Name))
+                    .ToDictionary(c => c.Name.ToLower(), c => c.Id);
 
                 for (int i = 1; i < lines.Length; i++) // Skip header
                 {
                     var parts = ParseCsvLine(lines[i]);
-                    if (parts.Length < 3) continue;
+                    if (parts.Length < 3)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
 
                     if (DateTime.TryParse(parts[0], out var date) &&
                         decimal.TryParse(parts[1], out var amount) &&
@@ -60,9 +68,39 @@ namespace Domain.Services
                         var categoryName = parts[2].Trim();
                         var notes = parts.Length > 3 ? parts[3] : "";
 
-                        var categoryId = categoryDict.ContainsKey(categoryName.ToLower())
-                            ? categoryDict[categoryName.ToLower()]
-                            : categories.FirstOrDefault(c => string.Equals(c.Name, "Other", StringComparison.OrdinalIgnoreCase))?.Id ?? 1;
+                        int categoryId;
+                        if (categoryDict.ContainsKey(categoryName.ToLower()))
+                        {
+                            categoryId = categoryDict[categoryName.ToLower()];
+                        }
+                        else
+                        {
+                            // Try to find "Other" category
+                            var otherCategory = categories.FirstOrDefault(c => 
+                                string.Equals(c.Name, "Other", StringComparison.OrdinalIgnoreCase));
+                            
+                            if (otherCategory == null)
+                            {
+                                // Create "Other" category if it doesn't exist
+                                var newOtherCategory = new Category { Name = "Other" };
+                                var result = await _categoryService.AddCategoryAsync(newOtherCategory);
+                                if (result.Success)
+                                {
+                                    categoryId = newOtherCategory.Id;
+                                    categories = await _categoryService.GetCategoriesAsync(); // Refresh
+                                }
+                                else
+                                {
+                                    errors.Add($"Line {i + 1}: Could not create 'Other' category");
+                                    skippedCount++;
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                categoryId = otherCategory.Id;
+                            }
+                        }
 
                         var expense = new Expense
                         {
@@ -72,12 +110,38 @@ namespace Domain.Services
                             Notes = notes
                         };
 
-                        await _expenseService.AddExpenseAsync(expense);
-                        importedCount++;
+                        var addResult = await _expenseService.AddExpenseAsync(expense);
+                        if (addResult.Success)
+                        {
+                            importedCount++;
+                        }
+                        else
+                        {
+                            errors.Add($"Line {i + 1}: {addResult.Message}");
+                            skippedCount++;
+                        }
+                    }
+                    else
+                    {
+                        skippedCount++;
                     }
                 }
 
-                return (true, $"Successfully imported {importedCount} expenses", importedCount);
+                var message = $"Successfully imported {importedCount} expenses";
+                if (skippedCount > 0)
+                {
+                    message += $", skipped {skippedCount} invalid rows";
+                }
+                if (errors.Any())
+                {
+                    message += $"\nErrors: {string.Join("; ", errors.Take(5))}";
+                    if (errors.Count > 5)
+                    {
+                        message += $" and {errors.Count - 5} more...";
+                    }
+                }
+
+                return (true, message, importedCount);
             }
             catch (Exception ex)
             {
@@ -96,6 +160,14 @@ namespace Domain.Services
         private string EscapeCsvField(string field)
         {
             if (string.IsNullOrEmpty(field)) return "";
+
+            // Prevent CSV injection by prefixing dangerous characters
+            if (field.StartsWith("=") || field.StartsWith("+") || 
+                field.StartsWith("-") || field.StartsWith("@") ||
+                field.StartsWith("\t") || field.StartsWith("\r"))
+            {
+                field = "'" + field;
+            }
 
             if (field.Contains(",") || field.Contains("\"") || field.Contains("\n"))
             {

@@ -1,4 +1,3 @@
-using Domain.Controllers;
 using Domain.Data;
 using Domain.Models;
 using Microsoft.EntityFrameworkCore;
@@ -18,18 +17,63 @@ namespace Domain.Services
             _context = context;
         }
 
-        public async Task AddExpenseAsync(Expense expense)
+        public async Task<(bool Success, string Message)> AddExpenseAsync(Expense expense)
         {
-            await _context.Expenses.AddAsync(expense);
-            await _context.SaveChangesAsync();
+            try
+            {
+                // Validate amount
+                if (expense.Amount <= 0)
+                {
+                    return (false, "Amount must be greater than zero");
+                }
+
+                // Validate date (not in the future)
+                if (expense.Date.Date > DateTime.Today)
+                {
+                    return (false, "Cannot add expenses for future dates");
+                }
+
+                // Validate category exists
+                var categoryExists = await _context.Categories.AnyAsync(c => c.Id == expense.CategoryId);
+                if (!categoryExists)
+                {
+                    return (false, "Selected category does not exist");
+                }
+
+                // Sanitize notes
+                if (!string.IsNullOrEmpty(expense.Notes))
+                {
+                    expense.Notes = expense.Notes.Trim();
+                    if (expense.Notes.Length > 500)
+                    {
+                        expense.Notes = expense.Notes.Substring(0, 500);
+                    }
+                }
+
+                await _context.Expenses.AddAsync(expense);
+                await _context.SaveChangesAsync();
+                return (true, "Expense added successfully");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Error adding expense: {ex.Message}");
+            }
         }
 
-        public async Task<List<Expense>> GetExpensesAsync()
+        public async Task<List<Expense>> GetExpensesAsync(int page = 1, int pageSize = 100)
         {
             return await _context.Expenses
                 .Include(e => e.Category)
                 .OrderByDescending(e => e.Date)
+                .ThenByDescending(e => e.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
+        }
+
+        public async Task<int> GetExpenseCountAsync()
+        {
+            return await _context.Expenses.CountAsync();
         }
 
         public async Task<List<Expense>> GetExpensesByDateRangeAsync(DateTime startDate, DateTime endDate)
@@ -38,6 +82,7 @@ namespace Domain.Services
                 .Include(e => e.Category)
                 .Where(e => e.Date >= startDate && e.Date <= endDate)
                 .OrderByDescending(e => e.Date)
+                .ThenByDescending(e => e.Id)
                 .ToListAsync();
         }
 
@@ -53,13 +98,14 @@ namespace Domain.Services
             try
             {
                 var expense = await _context.Expenses.FindAsync(id);
-                if (expense != null)
+                if (expense == null)
                 {
-                    _context.Expenses.Remove(expense);
-                    await _context.SaveChangesAsync();
-                    return (true, "Expense deleted successfully");
+                    return (false, "Expense not found");
                 }
-                return (false, "Expense not found");
+
+                _context.Expenses.Remove(expense);
+                await _context.SaveChangesAsync();
+                return (true, "Expense deleted successfully");
             }
             catch (Exception ex)
             {
@@ -71,7 +117,48 @@ namespace Domain.Services
         {
             try
             {
-                _context.Entry(expense).State = EntityState.Modified;
+                // Validate expense exists
+                var existingExpense = await _context.Expenses.FindAsync(expense.Id);
+                if (existingExpense == null)
+                {
+                    return (false, "Expense not found");
+                }
+
+                // Validate amount
+                if (expense.Amount <= 0)
+                {
+                    return (false, "Amount must be greater than zero");
+                }
+
+                // Validate date (not in the future)
+                if (expense.Date.Date > DateTime.Today)
+                {
+                    return (false, "Cannot set expense date to future dates");
+                }
+
+                // Validate category exists
+                var categoryExists = await _context.Categories.AnyAsync(c => c.Id == expense.CategoryId);
+                if (!categoryExists)
+                {
+                    return (false, "Selected category does not exist");
+                }
+
+                // Sanitize notes
+                if (!string.IsNullOrEmpty(expense.Notes))
+                {
+                    expense.Notes = expense.Notes.Trim();
+                    if (expense.Notes.Length > 500)
+                    {
+                        expense.Notes = expense.Notes.Substring(0, 500);
+                    }
+                }
+
+                // Update the existing entity
+                existingExpense.Amount = expense.Amount;
+                existingExpense.Date = expense.Date;
+                existingExpense.CategoryId = expense.CategoryId;
+                existingExpense.Notes = expense.Notes;
+
                 await _context.SaveChangesAsync();
                 return (true, "Expense updated successfully");
             }
@@ -98,11 +185,11 @@ namespace Domain.Services
             var summaries = await _context.Expenses
                 .Include(e => e.Category)
                 .Where(e => e.Date >= startDate && e.Date <= endDate)
-                .GroupBy(e => new { e.CategoryId, e.Category.Name })
+                .GroupBy(e => new { e.CategoryId, CategoryName = e.Category!.Name })
                 .Select(g => new CategorySummary
                 {
                     CategoryId = g.Key.CategoryId,
-                    CategoryName = g.Key.Name,
+                    CategoryName = g.Key.CategoryName,
                     TotalAmount = g.Sum(e => e.Amount),
                     ExpenseCount = g.Count()
                 })
@@ -118,15 +205,28 @@ namespace Domain.Services
                 .Include(e => e.Category)
                 .Where(e => e.CategoryId == categoryId)
                 .OrderByDescending(e => e.Date)
+                .ThenByDescending(e => e.Id)
                 .ToListAsync();
         }
 
-        public async Task DeleteAllExpensesAsync()
+        public async Task<(bool Success, string Message)> DeleteAllExpensesAsync()
         {
-            _context.Expenses.RemoveRange(_context.Expenses);
-            await _context.SaveChangesAsync();
+            try
+            {
+                var expenses = await _context.Expenses.ToListAsync();
+                if (!expenses.Any())
+                {
+                    return (true, "No expenses to delete");
+                }
+
+                _context.Expenses.RemoveRange(expenses);
+                await _context.SaveChangesAsync();
+                return (true, $"Successfully deleted {expenses.Count} expenses");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Error deleting expenses: {ex.Message}");
+            }
         }
     }
-
-
 }
