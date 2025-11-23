@@ -171,3 +171,25 @@ $RECYCLE.BIN/
 
 ## Task tracking files (can be removed after development)
 fix_null_warnings.md
+
+# =========================
+# Test Project
+# =========================
+Tests/bin/
+Tests/obj/
+Tests/TestResults/
+Tests/*.xml
+Tests/coverage.cobertura.xml
+Tests/coverage.info
+Tests/coverage.json
+
+# Coverage reports (generated files)
+**/coverage.cobertura.xml
+**/coverage.info
+**/coverage.json
+**/TestResults/
+
+# =========================
+# Solution Files
+# =========================
+*.sln
